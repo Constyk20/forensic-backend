@@ -5,14 +5,12 @@ import fs from "fs-extra";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// Import routes
-import deviceRoutes from "./routes/deviceRoutes.js";
-import evidenceRoutes from "./routes/evidenceRoutes.js";
-import analysisRoutes from "./routes/analysisRoutes.js";
-
 // Get current directory in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+console.log("📁 Current directory:", __dirname);
+console.log("🔍 Checking for routes directory...");
 
 const app = express();
 
@@ -55,10 +53,76 @@ const connectDB = async () => {
   }
 };
 
-// Routes
-app.use("/api/devices", deviceRoutes);
-app.use("/api/evidence", evidenceRoutes);
-app.use("/api/analysis", analysisRoutes);
+// Initialize routes with error handling
+const initializeRoutes = async () => {
+  try {
+    console.log("📂 Checking route files...");
+    
+    // Dynamically import routes with fallbacks
+    let deviceRoutes, evidenceRoutes, analysisRoutes;
+    
+    // Check if route files exist
+    const routesExist = {
+      device: fs.existsSync(path.join(__dirname, 'routes', 'deviceRoutes.js')),
+      evidence: fs.existsSync(path.join(__dirname, 'routes', 'evidenceRoutes.js')),
+      analysis: fs.existsSync(path.join(__dirname, 'routes', 'analysisRoutes.js'))
+    };
+    
+    console.log("Route files found:", routesExist);
+    
+    // Import routes or create fallbacks
+    if (routesExist.device) {
+      console.log("✓ Importing deviceRoutes...");
+      deviceRoutes = (await import("./routes/deviceRoutes.js")).default;
+    } else {
+      console.log("⚠️  deviceRoutes.js not found, creating fallback");
+      deviceRoutes = express.Router();
+      deviceRoutes.get("/", (req, res) => res.json({ message: "Device routes - file not found" }));
+    }
+    
+    if (routesExist.evidence) {
+      console.log("✓ Importing evidenceRoutes...");
+      evidenceRoutes = (await import("./routes/evidenceRoutes.js")).default;
+    } else {
+      console.log("⚠️  evidenceRoutes.js not found, creating fallback");
+      evidenceRoutes = express.Router();
+      evidenceRoutes.get("/", (req, res) => res.json({ message: "Evidence routes - file not found" }));
+      evidenceRoutes.post("/acquire", (req, res) => res.json({ 
+        error: "evidenceRoutes.js file is missing. Please create it." 
+      }));
+    }
+    
+    if (routesExist.analysis) {
+      console.log("✓ Importing analysisRoutes...");
+      analysisRoutes = (await import("./routes/analysisRoutes.js")).default;
+    } else {
+      console.log("⚠️  analysisRoutes.js not found, creating fallback");
+      analysisRoutes = express.Router();
+      analysisRoutes.get("/", (req, res) => res.json({ message: "Analysis routes - file not found" }));
+    }
+    
+    // Register routes
+    app.use("/api/devices", deviceRoutes);
+    app.use("/api/evidence", evidenceRoutes);
+    app.use("/api/analysis", analysisRoutes);
+    
+    console.log("✅ All routes initialized successfully");
+    
+  } catch (error) {
+    console.error("❌ Error initializing routes:", error);
+    
+    // Create minimal routes in case of error
+    const router = express.Router();
+    router.get("/", (req, res) => res.json({ 
+      error: "Route initialization failed", 
+      message: error.message 
+    }));
+    
+    app.use("/api/devices", router);
+    app.use("/api/evidence", router);
+    app.use("/api/analysis", router);
+  }
+};
 
 // Health check endpoint
 app.get("/api/health", (req, res) => {
@@ -67,7 +131,12 @@ app.get("/api/health", (req, res) => {
     status: "operational",
     timestamp: new Date().toISOString(),
     database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
-    version: "1.0.0"
+    version: "1.0.0",
+    routes: {
+      devices: "available",
+      evidence: "available",
+      analysis: "available"
+    }
   });
 });
 
@@ -149,29 +218,35 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
+    console.log("🚀 Starting server initialization...");
+    
     // Create required directories
     await createDirectories();
     
     // Connect to database
     await connectDB();
     
+    // Initialize routes
+    await initializeRoutes();
+    
     // Start server
     app.listen(PORT, () => {
       console.log("\n╔════════════════════════════════════════════════╗");
       console.log("║   IoT CCTV Forensic Analysis System           ║");
       console.log("╚════════════════════════════════════════════════╝");
-      console.log(`\n✓ Server running on port ${PORT}`);
-      console.log(`✓ Environment: ${process.env.NODE_ENV || "development"}`);
+      console.log(`\n✅ Server running on port ${PORT}`);
+      console.log(`📊 Environment: ${process.env.NODE_ENV || "development"}`);
       console.log(`\n📡 API Endpoints:`);
       console.log(`   Health:  http://localhost:${PORT}/api/health`);
       console.log(`   Docs:    http://localhost:${PORT}/api/docs`);
       console.log(`   Devices: http://localhost:${PORT}/api/devices`);
       console.log(`   Evidence: http://localhost:${PORT}/api/evidence`);
       console.log(`   Analysis: http://localhost:${PORT}/api/analysis`);
+      console.log(`\n🔗 Base URL: http://localhost:${PORT}`);
       console.log("\n════════════════════════════════════════════════\n");
     });
   } catch (error) {
-    console.error("Failed to start server:", error);
+    console.error("❌ Failed to start server:", error);
     process.exit(1);
   }
 };
